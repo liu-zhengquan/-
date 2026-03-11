@@ -1,0 +1,53 @@
+<view class="container">
+  <view class="header card">
+    <view class="title">基金实时估值助手（微信小程序版）</view>
+    <view class="desc">输入基金代码，默认每 15 秒自动刷新估值</view>
+  </view>
+
+  <view class="card">
+    <view class="form-row">
+      <input
+        class="code-input"
+        type="number"
+        maxlength="6"
+        placeholder="例如：161725"
+        value="{{fundCodeInput}}"
+        bindinput="onInputChange"
+      />
+      <button type="primary" size="mini" bindtap="onAddFund">添加</button>
+    </view>
+    <view class="hint">支持同时监控多只基金；点击卡片右侧可移除</view>
+  </view>
+
+  <view class="card">
+    <view class="list-title">
+      <text>监控列表</text>
+      <button size="mini" bindtap="onRefreshNow">立即刷新</button>
+    </view>
+
+    <block wx:if="{{funds.length === 0}}">
+      <view class="empty">暂无监控基金，请先添加基金代码</view>
+    </block>
+
+    <block wx:for="{{funds}}" wx:key="code">
+      <view class="fund-item">
+        <view class="main">
+          <view class="name-line">
+            <text class="name">{{item.name || '加载中...'}}</text>
+            <text class="code">{{item.code}}</text>
+          </view>
+          <view class="meta">
+            <text>最新净值：{{item.dwjz || '--'}}</text>
+            <text>估值：{{item.gsz || '--'}}</text>
+          </view>
+          <view class="meta">
+            <text>估值涨跌：</text>
+            <text class="{{Number(item.gszzl) >= 0 ? 'up' : 'down'}}">{{item.gszzl ? item.gszzl + '%' : '--'}}</text>
+          </view>
+          <view class="time">更新时间：{{item.gztime || item.error || '--'}}</view>
+        </view>
+        <button size="mini" bindtap="onRemoveFund" data-code="{{item.code}}">移除</button>
+      </view>
+    </block>
+  </view>
+</view>
