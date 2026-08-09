@@ -1,0 +1,47 @@
+name: Crawl A-share top10 bank shareholders 2010-2023
+
+on:
+  push:
+    paths:
+      - 'crawl_shareholders.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Crawl 2010-2023
+        run: python crawl_shareholders.py --start-year 2010 --end-year 2023 --output results_shareholders
+
+      - name: Show summary
+        if: always()
+        run: |
+          ls -lah results_shareholders || true
+          cat results_shareholders/00_运行摘要.json || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bank-shareholders-2010-2023
+          path: results_shareholders/
+          if-no-files-found: warn
+          retention-days: 30
