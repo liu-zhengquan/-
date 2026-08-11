@@ -1,0 +1,56 @@
+name: Fallback missing annual reports V2 2015-2017
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'fallback_missing_reports_v2.py'
+      - '.github/workflows/fallback-missing-reports-v2.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+env:
+  PYTHONUNBUFFERED: '1'
+jobs:
+  fallback-v2:
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        year: [2015, 2016, 2017]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y poppler-utils
+          pip install requests akshare==1.18.64
+      - name: Download first fallback artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: executive-bank-history-final-${{ matrix.year }}
+          path: prior/${{ matrix.year }}
+          github-token: ${{ github.token }}
+          run-id: 31523765443
+      - name: Second-stage fallback
+        run: |
+          python fallback_missing_reports_v2.py \
+            --year ${{ matrix.year }} \
+            --input-dir prior/${{ matrix.year }} \
+            --output results_fallback_v2/${{ matrix.year }}
+      - name: Show summary
+        if: always()
+        run: cat results_fallback_v2/${{ matrix.year }}/00_运行摘要_最终补查V2.json || true
+      - name: Upload V2 result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: executive-bank-history-final-v2-${{ matrix.year }}
+          path: results_fallback_v2/${{ matrix.year }}/
+          if-no-files-found: warn
+          retention-days: 30
