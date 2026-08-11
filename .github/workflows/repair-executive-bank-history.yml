@@ -1,0 +1,76 @@
+name: Repair non-ST non-financial A-share executive bank histories 2010-2023
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'repair_executive_bank_history.py'
+      - '.github/workflows/repair-executive-bank-history.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  repair-executive-bank-history:
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        year: [2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y poppler-utils
+          python -m pip install --upgrade pip
+          pip install requests akshare==1.18.64
+
+      - name: Syntax check
+        run: python -m py_compile repair_executive_bank_history.py crawl_executive_bank_history.py crawl_shareholders.py crawl_executives.py
+
+      - name: Download first-run artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: executive-bank-history-nonst-nonfinancial-${{ matrix.year }}
+          path: prior/${{ matrix.year }}
+          github-token: ${{ github.token }}
+          run-id: 31462935714
+
+      - name: Repair missing reports and strict-clean bank histories
+        run: |
+          python repair_executive_bank_history.py \
+            --year ${{ matrix.year }} \
+            --input-dir prior/${{ matrix.year }} \
+            --output results_executive_bank_history_repaired/${{ matrix.year }} \
+            --query-workers 4 \
+            --pdf-workers 3
+
+      - name: Show repaired summary
+        if: always()
+        run: |
+          find results_executive_bank_history_repaired/${{ matrix.year }} -maxdepth 1 -type f -printf '%f %s bytes\n' || true
+          cat results_executive_bank_history_repaired/${{ matrix.year }}/00_运行摘要_修复后.json || true
+
+      - name: Upload repaired year result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: executive-bank-history-repaired-${{ matrix.year }}
+          path: results_executive_bank_history_repaired/${{ matrix.year }}/
+          if-no-files-found: warn
+          retention-days: 30
