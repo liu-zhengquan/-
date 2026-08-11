@@ -20,13 +20,13 @@ jobs:
       matrix:
         year: [2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023]
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests
+      - run: pip install requests akshare==1.18.84
       - name: Download source artifact for 2015-2017
         if: matrix.year == 2015 || matrix.year == 2016 || matrix.year == 2017
         uses: actions/download-artifact@v4
