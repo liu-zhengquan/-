@@ -1,0 +1,59 @@
+name: Correct A-share annual universe by listing date 2010-2023
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'correct_universe_by_listing_date.py'
+      - '.github/workflows/correct-universe-listing-date.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  correct:
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        year: [2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: Download source artifact for 2015-2017
+        if: matrix.year == 2015 || matrix.year == 2016 || matrix.year == 2017
+        uses: actions/download-artifact@v4
+        with:
+          name: executive-bank-history-final-${{ matrix.year }}
+          path: prior/${{ matrix.year }}
+          github-token: ${{ github.token }}
+          run-id: 31539261504
+      - name: Download repaired artifact for other years
+        if: matrix.year != 2015 && matrix.year != 2016 && matrix.year != 2017
+        uses: actions/download-artifact@v4
+        with:
+          name: executive-bank-history-repaired-${{ matrix.year }}
+          path: prior/${{ matrix.year }}
+          github-token: ${{ github.token }}
+          run-id: 31507316331
+      - name: Correct listing-date universe
+        run: |
+          python correct_universe_by_listing_date.py --year ${{ matrix.year }} --input-dir prior/${{ matrix.year }} --output corrected/${{ matrix.year }}
+      - name: Show summary
+        if: always()
+        run: cat corrected/${{ matrix.year }}/00_运行摘要_上市日期修正.json || true
+      - name: Upload corrected result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: executive-bank-history-corrected-${{ matrix.year }}
+          path: corrected/${{ matrix.year }}/
+          if-no-files-found: warn
+          retention-days: 30
