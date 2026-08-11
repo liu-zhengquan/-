@@ -1,0 +1,80 @@
+name: Crawl executive bank histories coverage-fixed 2010-2023
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crawl_executive_bank_history_v2.py'
+      - '.github/workflows/crawl-executive-bank-history-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: '1'
+  REPORT_WORKERS: '8'
+
+jobs:
+  executive-bank-history-v2:
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        year: [2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y poppler-utils
+          python -m pip install --upgrade pip
+          pip install requests akshare==1.18.64
+
+      - name: Syntax check
+        run: python -m py_compile crawl_executive_bank_history.py crawl_executive_bank_history_v2.py crawl_shareholders.py crawl_executives.py
+
+      - name: Crawl coverage-fixed sample and executive bank histories
+        run: |
+          python crawl_executive_bank_history_v2.py \
+            --year ${{ matrix.year }} \
+            --output results_executive_bank_history_v2/${{ matrix.year }} \
+            --industry-workers 4
+
+      - name: Enforce minimum annual-report coverage
+        run: |
+          python - <<'PY'
+          import json, os
+          y='${{ matrix.year }}'
+          p=f'results_executive_bank_history_v2/{y}/00_运行摘要.json'
+          d=json.load(open(p,encoding='utf-8'))
+          kept=int(d['最终样本公司数']); found=int(d['找到年报公司数'])
+          cov=(found/kept) if kept else 1
+          print('coverage', y, found, kept, cov)
+          if cov < 0.90:
+              raise SystemExit(f'annual report coverage below 90%: {cov:.2%}')
+          PY
+
+      - name: Show summary
+        if: always()
+        run: |
+          find results_executive_bank_history_v2/${{ matrix.year }} -maxdepth 1 -type f -printf '%f %s bytes\n' || true
+          cat results_executive_bank_history_v2/${{ matrix.year }}/00_运行摘要.json || true
+
+      - name: Upload year result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: executive-bank-history-v2-${{ matrix.year }}
+          path: results_executive_bank_history_v2/${{ matrix.year }}/
+          if-no-files-found: warn
+          retention-days: 30
