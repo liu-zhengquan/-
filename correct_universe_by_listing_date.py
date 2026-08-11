@@ -5,6 +5,7 @@ from pathlib import Path
 from collections import defaultdict
 import requests
 
+A_PREFIX=("000","001","002","003","300","301","600","601","603","605","688","689")
 
 def read_csv(p):
     if not p.exists(): return []
@@ -20,34 +21,88 @@ def write_csv(p,rows):
     with p.open('w',encoding='utf-8-sig',newline='') as f:
         w=csv.DictWriter(f,fieldnames=fields,extrasaction='ignore');w.writeheader();w.writerows(rows)
 
-def listing_dates():
-    # Eastmoney A-share universe. f26 is listing date (YYYYMMDD).
-    url='https://82.push2.eastmoney.com/api/qt/clist/get'
-    params={'pn':1,'pz':10000,'po':1,'np':1,'fltt':2,'invt':2,'fid':'f12',
-            'fs':'m:0+t:6,m:0+t:80,m:0+t:81+s:2048,m:1+t:2,m:1+t:23,m:1+t:8',
-            'fields':'f12,f14,f26'}
-    h={'User-Agent':'Mozilla/5.0','Referer':'https://quote.eastmoney.com/'}
+def norm_date(v):
+    s=str(v or '').strip()
+    if not s or s.lower() in {'nan','nat','none'}: return ''
+    m=re.search(r'((?:19|20)\d{2})[-/.年]?(\d{1,2})[-/.月]?(\d{1,2})',s)
+    if m:return f'{int(m.group(1)):04d}{int(m.group(2)):02d}{int(m.group(3)):02d}'
+    d=re.sub(r'\D','',s)
+    return d[:8] if re.fullmatch(r'(?:19|20)\d{6}',d[:8]) else ''
+
+def valid_code(c):
+    return bool(re.fullmatch(r'\d{6}',c)) and c.startswith(A_PREFIX)
+
+def retry_call(fn,label,tries=7):
     last=None
-    for i in range(6):
+    for i in range(tries):
         try:
-            r=requests.get(url,params=params,headers=h,timeout=45);r.raise_for_status();j=r.json()
-            diff=((j.get('data') or {}).get('diff') or [])
-            out={}
-            for x in diff:
-                c=str(x.get('f12') or '')
-                d=str(x.get('f26') or '').replace('-','')
-                if re.fullmatch(r'\d{6}',c) and re.fullmatch(r'\d{8}',d):out[c]=d
-            if len(out)<3000: raise RuntimeError(f'listing map too small: {len(out)}')
-            return out
+            x=fn()
+            if x is None or getattr(x,'empty',False): raise RuntimeError(f'{label} empty')
+            logging.info('%s rows=%d',label,len(x));return x
         except Exception as e:
-            last=e;time.sleep(min(15,1.5*(2**i))+random.random())
-    raise RuntimeError(last)
+            last=e;logging.warning('%s attempt %d failed: %r',label,i+1,e)
+            time.sleep(min(30,2*(2**i))+random.uniform(.5,2.0))
+    raise RuntimeError(f'{label} failed: {last!r}')
+
+def listing_dates_exchange():
+    import akshare as ak
+    out={};src={}
+    def add(df,code_col,date_col,source):
+        for _,r in df.iterrows():
+            c=str(r.get(code_col,'')).strip();d=norm_date(r.get(date_col,''))
+            if valid_code(c) and d:
+                if c not in out or d<out[c]:out[c]=d;src[c]=source
+    sh_main=retry_call(lambda:ak.stock_info_sh_name_code(symbol='主板A股'),'SSE main A')
+    add(sh_main,'证券代码','上市日期','上交所主板A股')
+    sh_star=retry_call(lambda:ak.stock_info_sh_name_code(symbol='科创板'),'SSE STAR')
+    add(sh_star,'证券代码','上市日期','上交所科创板')
+    sz=retry_call(lambda:ak.stock_info_sz_name_code(symbol='A股列表'),'SZSE A')
+    add(sz,'A股代码','A股上市日期','深交所A股')
+    sh_del=retry_call(lambda:ak.stock_info_sh_delist(symbol='全部'),'SSE delist')
+    add(sh_del,'公司代码','上市日期','上交所暂停/终止上市')
+    sz_del=retry_call(lambda:ak.stock_info_sz_delist(symbol='终止上市公司'),'SZSE delist')
+    add(sz_del,'证券代码','上市日期','深交所终止上市')
+    if len(out)<4500: raise RuntimeError(f'exchange listing map too small: {len(out)}')
+    return out,src
+
+def listing_dates_eastmoney():
+    hosts=['https://push2.eastmoney.com/api/qt/clist/get','https://82.push2.eastmoney.com/api/qt/clist/get','https://20.push2.eastmoney.com/api/qt/clist/get','https://48.push2.eastmoney.com/api/qt/clist/get']
+    base={'pz':500,'po':1,'np':1,'fltt':2,'invt':2,'fid':'f12','fs':'m:0+t:6,m:0+t:80,m:0+t:81+s:2048,m:1+t:2,m:1+t:23,m:1+t:8','fields':'f12,f14,f26'}
+    h={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36','Referer':'https://quote.eastmoney.com/'}
+    out={};src={};s=requests.Session(); total_pages=20
+    time.sleep(random.uniform(1,8))
+    for pn in range(1,total_pages+1):
+        ok=False;last=None
+        for i in range(10):
+            try:
+                p=dict(base);p['pn']=pn;url=hosts[(pn+i)%len(hosts)]
+                r=s.get(url,params=p,headers=h,timeout=35);r.raise_for_status();j=r.json();data=j.get('data') or {};diff=data.get('diff') or []
+                if pn==1:
+                    total=int(data.get('total') or 0);total_pages=max(1,min(30,(total+499)//500));logging.info('Eastmoney total=%d pages=%d',total,total_pages)
+                if not diff and pn<=total_pages: raise RuntimeError('empty diff')
+                for x in diff:
+                    c=str(x.get('f12') or '');d=norm_date(x.get('f26') or '')
+                    if valid_code(c) and d:out[c]=d;src[c]='东方财富上市日期兜底'
+                ok=True;break
+            except Exception as e:
+                last=e;time.sleep(min(20,1.5*(2**min(i,4)))+random.random())
+        if not ok: raise RuntimeError(f'Eastmoney page {pn} failed: {last!r}')
+        if pn>=total_pages:break
+    if len(out)<3500: raise RuntimeError(f'Eastmoney listing map too small: {len(out)}')
+    return out,src
+
+def listing_dates():
+    try:
+        out,src=listing_dates_exchange();logging.info('listing map from exchanges=%d',len(out));return out,src,'上交所/深交所官方股票列表及退市列表（AKShare接口）'
+    except Exception as e:
+        logging.warning('exchange listing source failed, use Eastmoney fallback: %r',e)
+        out,src=listing_dates_eastmoney();return out,src,'东方财富兜底'
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--year',type=int,required=True);ap.add_argument('--input-dir',type=Path,required=True);ap.add_argument('--output',type=Path,required=True)
     a=ap.parse_args();y=a.year;inp=a.input_dir;out=a.output;out.mkdir(parents=True,exist_ok=True)
     logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
-    lm=listing_dates(); cutoff=f'{y}1231'
+    lm,lmsrc,lmsource=listing_dates(); cutoff=f'{y}1231'
     sample=read_csv(inp/'01_样本公司清单_剔除ST金融业.csv')
     rep_candidates=[inp/'02_年报清单_全市场补查.csv',inp/'02_年报清单_最终补查.csv',inp/'02_年报清单_修复后.csv',inp/'02_年报清单.csv']
     reports=[]
@@ -60,7 +115,7 @@ def main():
     corrected=[]; removed=[]; missing_date=[]
     for r in sample:
         rr=dict(r);c=rr.get('证券代码','');d=lm.get(c,'')
-        rr['上市日期']=d
+        rr['上市日期']=d;rr['上市日期来源']=lmsrc.get(c,'')
         rr['年末是否已上市']='1' if d and d<=cutoff else ('0' if d else '')
         if d and d>cutoff:
             rr['最终是否纳入样本']=0;rr['剔除原因']='年末尚未上市';removed.append(rr)
@@ -77,8 +132,7 @@ def main():
     oldp={r.get('证券代码'):r for r in oldpanel}
     panel=[]
     for s in kept:
-        c=s['证券代码']; rs=g.get(c,[]);found=c in rcodes
-        op=oldp.get(c,{})
+        c=s['证券代码']; rs=g.get(c,[]);found=c in rcodes;op=oldp.get(c,{})
         parsed=str(op.get('年报是否成功解析',''))=='1' if op else found
         panel.append({'报告年度':y,'证券代码':c,'证券简称':s.get('证券简称',''),'上市日期':s.get('上市日期',''),'年报是否找到':1 if found else 0,'年报是否成功解析':1 if parsed else 0,
             '是否存在高管银行关联':(1 if rs else 0) if parsed else '', '银行背景高管人数':len({x.get('高管姓名','') for x in rs if x.get('高管姓名')}) if parsed else '',
@@ -89,7 +143,7 @@ def main():
             '关联银行列表':'；'.join(sorted({x.get('标准化银行名称','') for x in rs if x.get('标准化银行名称')})) if parsed else '',
             '样本口径':'沪深A股；上市日期不晚于当年12月31日；剔除当年ST/退市整理及当年金融业；未覆盖公司不编码为0'})
     cov=round(100*len(rcodes)/len(kept),2) if kept else 0
-    summary={'报告年度':y,'原样本公司数':sum(1 for r in sample if str(r.get('最终是否纳入样本'))=='1'),'剔除年末尚未上市公司数':len(removed),'上市日期缺失代码数':len(set(missing_date)),
+    summary={'报告年度':y,'上市日期数据源':lmsource,'上市日期映射代码数':len(lm),'原样本公司数':sum(1 for r in sample if str(r.get('最终是否纳入样本'))=='1'),'剔除年末尚未上市公司数':len(removed),'上市日期缺失代码数':len(set(missing_date)),
              '修正后最终样本公司数':len(kept),'年报覆盖公司数':len(rcodes),'年报覆盖率（%）':cov,'严格银行任职记录数':len(det),'有银行背景公司数_严格':len({r.get('证券代码') for r in det}),'人工复核记录数_严格':len(rev),'错误记录数':len(errors)}
     write_csv(out/'01_样本公司清单_上市日期修正.csv',corrected);write_csv(out/'02_年报清单_最终.csv',sorted(reports,key=lambda r:r.get('证券代码','')))
     write_csv(out/'03_高管银行任职分段明细_严格.csv',det);write_csv(out/'04_人工复核队列_严格.csv',rev);write_csv(out/'05_公司年度高管银行背景面板_严格.csv',panel);write_csv(out/'99_错误日志.csv',errors)
