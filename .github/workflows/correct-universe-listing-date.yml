@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'correct_universe_by_listing_date.py'
+      - 'correct_universe_by_listing_date_v2.py'
       - '.github/workflows/correct-universe-listing-date.yml'
   workflow_dispatch:
 
@@ -16,7 +16,7 @@ jobs:
   correct:
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 2
       matrix:
         year: [2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023]
     runs-on: ubuntu-latest
@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests akshare==1.18.84
+      - run: pip install requests
       - name: Download source artifact for 2015-2017
         if: matrix.year == 2015 || matrix.year == 2016 || matrix.year == 2017
         uses: actions/download-artifact@v4
@@ -45,7 +45,7 @@ jobs:
           run-id: 31507316331
       - name: Correct listing-date universe
         run: |
-          python correct_universe_by_listing_date.py --year ${{ matrix.year }} --input-dir prior/${{ matrix.year }} --output corrected/${{ matrix.year }}
+          python correct_universe_by_listing_date_v2.py --year ${{ matrix.year }} --input-dir prior/${{ matrix.year }} --output corrected/${{ matrix.year }}
       - name: Show summary
         if: always()
         run: cat corrected/${{ matrix.year }}/00_运行摘要_上市日期修正.json || true
