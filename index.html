@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>基金实时估值助手</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>基金实时估值助手</h1>
+        <p>输入基金代码，自动每 15 秒刷新估值（基于天天基金估值接口）。</p>
+      </header>
+
+      <section class="panel">
+        <form id="fund-form" class="fund-form">
+          <input
+            id="fund-code"
+            type="text"
+            inputmode="numeric"
+            maxlength="6"
+            placeholder="例如：161725"
+            aria-label="基金代码"
+            required
+          />
+          <button type="submit">添加基金</button>
+        </form>
+        <small class="hint">支持多个基金同时监控；点击“移除”可删除。</small>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title">
+          <h2>监控列表</h2>
+          <button id="refresh-now" class="secondary">立即刷新</button>
+        </div>
+        <ul id="fund-list" class="fund-list"></ul>
+      </section>
+    </main>
+
+    <template id="fund-item-template">
+      <li class="fund-item">
+        <div>
+          <div class="name-line">
+            <span class="fund-name"></span>
+            <span class="fund-code"></span>
+          </div>
+          <div class="meta">
+            <span>最新净值：<strong class="dwjz">--</strong></span>
+            <span>估值：<strong class="gsz">--</strong></span>
+            <span>估值涨跌：<strong class="gszzl">--</strong></span>
+          </div>
+          <div class="time">更新时间：<span class="gztime">--</span></div>
+        </div>
+        <button class="remove-btn secondary">移除</button>
+      </li>
+    </template>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
